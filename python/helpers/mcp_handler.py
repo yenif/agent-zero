@@ -33,7 +33,7 @@ from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp import Client as FastMCPClient
-from mcp.shared.message import SessionMessage, ContentPart
+from mcp.shared.message import SessionMessage
 from mcp.types import CallToolResult, ListToolsResult, JSONRPCMessage
 # Import errors for error formatting if not already available at this scope
 from python.helpers import errors # Ensure errors is available for format_error
@@ -1152,32 +1152,11 @@ class MCPClientRemote(MCPClientBase):
                     is_error_response = False # Default for FastMCPClient path, errors are exceptions
 
                     if hasattr(response, '__aiter__'): # Async iterator (e.g. for streaming responses)
-                        async for part_data in response: # Renamed to part_data
-                            if isinstance(part_data, dict):
-                                try:
-                                    processed_part = ContentPart(**part_data)
-                                    collected_content_parts.append(processed_part)
-                                except Exception as e:
-                                    PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Error converting dict to ContentPart: {e}. Original part: {part_data}")
-                                    PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Skipping part due to conversion error.")
-                            elif hasattr(part_data, 'type') and (hasattr(part_data, 'text') or hasattr(part_data, 'tool_code') or hasattr(part_data, 'tool_calls') or hasattr(part_data, 'image_url') or hasattr(part_data, 'error')):
-                                collected_content_parts.append(part_data) # Assumes structural compatibility
-                            else:
-                                PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Unexpected part type '{type(part_data)}' in stream from FastMCPClient. Skipping part: {str(part_data)[:200]}")
+                        async for part_data in response:
+                            collected_content_parts.append(part_data) # Directly append
                     elif isinstance(response, list): # Already a list of parts
-                        # Assuming if it's a list, items are already compatible ContentPart-like objects or dicts
                         for part_data in response:
-                            if isinstance(part_data, dict):
-                                try:
-                                    processed_part = ContentPart(**part_data)
-                                    collected_content_parts.append(processed_part)
-                                except Exception as e:
-                                    PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Error converting dict in list to ContentPart: {e}. Original part: {part_data}")
-                                    PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Skipping part in list due to conversion error.")
-                            elif hasattr(part_data, 'type') and (hasattr(part_data, 'text') or hasattr(part_data, 'tool_code') or hasattr(part_data, 'tool_calls') or hasattr(part_data, 'image_url') or hasattr(part_data, 'error')):
-                                collected_content_parts.append(part_data)
-                            else:
-                                PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Unexpected part type '{type(part_data)}' in list from FastMCPClient. Skipping part: {str(part_data)[:200]}")
+                            collected_content_parts.append(part_data) # Directly append
                     elif hasattr(response, 'content') and isinstance(response.content, list) and hasattr(response, 'is_error'):
                         # This handles if FastMCPClient.call_tool() returns an object
                         # similar to mcp.types.CallToolResult directly (non-streaming case)
