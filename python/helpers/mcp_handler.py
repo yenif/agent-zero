@@ -1081,7 +1081,7 @@ class MCPClientRemote(MCPClientBase):
                             {
                                 "name": tool.name,
                                 "description": tool.description,
-                                "input_schema": tool.input_schema,
+                                "input_schema": tool.inputSchema, # Corrected attribute
                             }
                             for tool in listed_tools
                         ]
