@@ -32,8 +32,11 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
 from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp import Client as FastMCPClient
 from mcp.shared.message import SessionMessage
 from mcp.types import CallToolResult, ListToolsResult, JSONRPCMessage
+# Import errors for error formatting if not already available at this scope
+from python.helpers import errors # Ensure errors is available for format_error
 from anyio.streams.memory import (
     MemoryObjectReceiveStream,
     MemoryObjectSendStream,
@@ -1050,45 +1053,118 @@ class MCPClientLocal(MCPClientBase):
 
 class MCPClientRemote(MCPClientBase):
 
+    async def update_tools(self) -> "MCPClientBase": # Type hint might need adjustment
+        server: MCPServerRemote = cast(MCPServerRemote, self.server)
+        server_transport_mode = server.transport
+        is_streamable_http = False
+        if server_transport_mode == "streamable-http":
+            is_streamable_http = True
+        elif server_transport_mode == "auto":
+            if "/sse/" not in server.url.lower():
+                is_streamable_http = True
+
+        if is_streamable_http:
+            PrintStyle(font_color="cyan").print(f"MCPClientRemote ({server.name}): Updating tools using FastMCPClient (StreamableHttpTransport) for {server.url}")
+            try:
+                transport = StreamableHttpTransport(
+                    url=server.url,
+                    headers=server.headers
+                )
+                # FastMCPClient handles timeouts internally. init_timeout is conceptual here.
+                # setts = settings.get_settings() # Not directly used for FastMCPClient timeout
+
+                async with FastMCPClient(transport=transport) as client:
+                    listed_tools = await client.list_tools() # Returns List[ToolSchema]
+
+                    with self._MCPClientBase__lock: # Accessing private lock of base class
+                        self.tools = [
+                            {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "input_schema": tool.input_schema,
+                            }
+                            for tool in listed_tools
+                        ]
+                    PrintStyle(font_color="green").print(
+                        f"MCPClientRemote ({server.name}): Tools updated via StreamableHttp. Found {len(self.tools)} tools."
+                    )
+                    self.error = "" # Clear previous error
+            except Exception as e:
+                error_text = errors.format_error(e, 0, 0)
+                PrintStyle(background_color="#CC34C3", font_color="white", bold=True, padding=True).print(
+                    f"MCPClientRemote ({server.name}): 'update_tools' (StreamableHttp) failed: {error_text}"
+                )
+                with self._MCPClientBase__lock:
+                    self.tools = []
+                    self.error = f"Failed to initialize (StreamableHttp). {error_text[:200]}{'...' if len(error_text) > 200 else ''}"
+            return self
+        else:
+            # Fallback to SSE logic via MCPClientBase
+            PrintStyle(font_color="cyan").print(f"MCPClientRemote ({server.name}): Updating tools using sse_client (via super) for {server.url}")
+            return await super().update_tools()
+
+    async def call_tool(self, tool_name: str, input_data: Dict[str, Any]) -> CallToolResult:
+        server: MCPServerRemote = cast(MCPServerRemote, self.server)
+        server_transport_mode = server.transport
+        is_streamable_http = False
+        if server_transport_mode == "streamable-http":
+            is_streamable_http = True
+        elif server_transport_mode == "auto":
+            if "/sse/" not in server.url.lower():
+                is_streamable_http = True
+
+        if is_streamable_http:
+            PrintStyle(font_color="cyan").print(f"MCPClientRemote ({server.name}): Calling tool '{tool_name}' using FastMCPClient (StreamableHttpTransport)")
+            if not self.has_tool(tool_name):
+                PrintStyle(font_color="orange").print(f"MCPClientRemote ({server.name}): Tool '{tool_name}' not in cache for StreamableHttp 'call_tool', refreshing tools...")
+                await self.update_tools()
+                if not self.has_tool(tool_name):
+                    PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Tool '{tool_name}' not found after refresh. Raising ValueError.")
+                    raise ValueError(f"Tool {tool_name} not found after refreshing tool list for server {server.name}.")
+
+            try:
+                transport = StreamableHttpTransport(
+                    url=server.url,
+                    headers=server.headers
+                )
+                # tool_timeout is conceptual here. FastMCPClient handles its own timeouts.
+                async with FastMCPClient(transport=transport) as client:
+                    response = await client.call_tool(tool_name, input_data)
+                    # Assuming fastmcp.CallResult is compatible or directly usable as mcp.types.CallToolResult
+                    # If not, conversion would be:
+                    # return CallToolResult(content=response.content, isError=response.is_error)
+                    return response
+
+            except Exception as e:
+                PrintStyle(background_color="#AA4455", font_color="white", padding=True).print(
+                    f"MCPClientRemote ({server.name}): 'call_tool' (StreamableHttp) for '{tool_name}' failed: {type(e).__name__}: {e}"
+                )
+                raise ConnectionError(f"MCPClientRemote::Failed to call tool '{tool_name}' on server '{server.name}' (StreamableHttp). Original error: {type(e).__name__}: {e}")
+        else:
+            # Fallback to SSE logic via MCPClientBase
+            PrintStyle(font_color="cyan").print(f"MCPClientRemote ({server.name}): Calling tool '{tool_name}' using sse_client (via super)")
+            return await super().call_tool(tool_name, input_data)
+
     async def _create_stdio_transport(
         self, current_exit_stack: AsyncExitStack
     ) -> tuple[
         MemoryObjectReceiveStream[SessionMessage | Exception],
         MemoryObjectSendStream[SessionMessage],
     ]:
-        """Connect to an MCP server, init client and save stdio/write streams"""
+        """Connect to an MCP server (SSE only), init client and save stdio/write streams"""
         server: MCPServerRemote = cast(MCPServerRemote, self.server)
-        setts = settings.get_settings() # Renamed to avoid conflict with 'set' type
+        setts = settings.get_settings()
         init_timeout = server.init_timeout or setts["mcp_client_init_timeout"]
-        tool_timeout = server.tool_timeout or setts["mcp_client_tool_timeout"] # sse_client specific
+        tool_timeout = server.tool_timeout or setts["mcp_client_tool_timeout"]
 
-        chosen_transport_method = server.transport
-        use_streamable_http = False
+        PrintStyle(font_color="cyan").print(f"MCPClientRemote ({server.name}): Creating SSE transport for {server.url}")
 
-        if chosen_transport_method == "streamable-http":
-            use_streamable_http = True
-        elif chosen_transport_method == "auto":
-            if "/sse/" not in server.url.lower():
-                use_streamable_http = True
-
-        # For logging/debugging purposes
-        transport_name = "StreamableHttpTransport" if use_streamable_http else "SSETransport"
-        PrintStyle(font_color="cyan").print(f"MCPClientRemote ({server.name}): Attempting to use {transport_name} for {server.url}")
-
-        if use_streamable_http:
-            transport_context = StreamableHttpTransport(
-                url=server.url,
-                headers=server.headers,
-                # No explicit timeout here based on current FastMCP docs for this class,
-                # relying on ClientSession's read_timeout_seconds or transport defaults.
-            )
-        else:
-            transport_context = sse_client(
-                url=server.url,
-                headers=server.headers,
-                timeout=init_timeout, # For initial connection by sse_client
-                sse_read_timeout=tool_timeout, # For read operations by sse_client
-            )
+        transport_context = sse_client(
+            url=server.url,
+            headers=server.headers,
+            timeout=init_timeout,
+            sse_read_timeout=tool_timeout,
+        )
 
         stdio_transport = await current_exit_stack.enter_async_context(transport_context)
         return stdio_transport
