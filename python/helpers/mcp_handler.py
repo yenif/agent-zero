@@ -31,6 +31,7 @@ import os
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
+from fastmcp.client.transports import StreamableHttpTransport
 from mcp.shared.message import SessionMessage
 from mcp.types import CallToolResult, ListToolsResult, JSONRPCMessage
 from anyio.streams.memory import (
@@ -214,6 +215,7 @@ class MCPServerRemote(BaseModel):
     headers: dict[str, Any] | None = Field(default_factory=dict[str, Any])
     init_timeout: int = Field(default=0)
     tool_timeout: int = Field(default=0)
+    transport: Literal["auto", "streamable-http", "sse"] = Field(default="auto")
     disabled: bool = Field(default=False)
 
     __lock: ClassVar[threading.Lock] = PrivateAttr(default=threading.Lock())
@@ -261,6 +263,7 @@ class MCPServerRemote(BaseModel):
                     "headers",
                     "init_timeout",
                     "tool_timeout",
+                    "transport",
                     "disabled",
                 ]:
                     if key == "name":
@@ -1055,13 +1058,37 @@ class MCPClientRemote(MCPClientBase):
     ]:
         """Connect to an MCP server, init client and save stdio/write streams"""
         server: MCPServerRemote = cast(MCPServerRemote, self.server)
-        set = settings.get_settings()
-        stdio_transport = await current_exit_stack.enter_async_context(
-            sse_client(
+        setts = settings.get_settings() # Renamed to avoid conflict with 'set' type
+        init_timeout = server.init_timeout or setts["mcp_client_init_timeout"]
+        tool_timeout = server.tool_timeout or setts["mcp_client_tool_timeout"] # sse_client specific
+
+        chosen_transport_method = server.transport
+        use_streamable_http = False
+
+        if chosen_transport_method == "streamable-http":
+            use_streamable_http = True
+        elif chosen_transport_method == "auto":
+            if "/sse/" not in server.url.lower():
+                use_streamable_http = True
+
+        # For logging/debugging purposes
+        transport_name = "StreamableHttpTransport" if use_streamable_http else "SSETransport"
+        PrintStyle(font_color="cyan").print(f"MCPClientRemote ({server.name}): Attempting to use {transport_name} for {server.url}")
+
+        if use_streamable_http:
+            transport_context = StreamableHttpTransport(
                 url=server.url,
                 headers=server.headers,
-                timeout=server.init_timeout or set["mcp_client_init_timeout"],
-                sse_read_timeout=server.tool_timeout or set["mcp_client_tool_timeout"],
+                # No explicit timeout here based on current FastMCP docs for this class,
+                # relying on ClientSession's read_timeout_seconds or transport defaults.
             )
-        )
+        else:
+            transport_context = sse_client(
+                url=server.url,
+                headers=server.headers,
+                timeout=init_timeout, # For initial connection by sse_client
+                sse_read_timeout=tool_timeout, # For read operations by sse_client
+            )
+
+        stdio_transport = await current_exit_stack.enter_async_context(transport_context)
         return stdio_transport

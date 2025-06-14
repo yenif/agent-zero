@@ -166,6 +166,7 @@ docker run -p 50001:80 frdel/agent-zero-run
 
 - Agent Zero can now act as MCP Server
 - Agent Zero can use external MCP servers as tools
+  - Enhanced to support both Streamable HTTP and SSE transports for external servers, with auto-detection and manual configuration options.
 
 ### v0.8.4.1 - 2
 Default models set to gpt-4.1
