@@ -33,7 +33,7 @@ from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp import Client as FastMCPClient
-from mcp.shared.message import SessionMessage
+from mcp.shared.message import SessionMessage, ContentPart
 from mcp.types import CallToolResult, ListToolsResult, JSONRPCMessage
 # Import errors for error formatting if not already available at this scope
 from python.helpers import errors # Ensure errors is available for format_error
@@ -1130,10 +1130,67 @@ class MCPClientRemote(MCPClientBase):
                 # tool_timeout is conceptual here. FastMCPClient handles its own timeouts.
                 async with FastMCPClient(transport=transport) as client:
                     response = await client.call_tool(tool_name, input_data)
-                    # Assuming fastmcp.CallResult is compatible or directly usable as mcp.types.CallToolResult
-                    # If not, conversion would be:
-                    # return CallToolResult(content=response.content, isError=response.is_error)
-                    return response
+
+                    PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): Raw response type from FastMCPClient.call_tool: {type(response)}")
+                    if hasattr(response, '__aiter__'): # Check if it's an async iterator
+                        PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): Response appears to be an async iterator.")
+                    elif isinstance(response, list):
+                        PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): Response appears to be a list. Length: {len(response)}")
+                        if response:
+                            PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): First item type: {type(response[0])}, First item: {str(response[0])[:200]}")
+                    else:
+                        try:
+                            PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): Response (non-iterator, non-list): {str(response)[:200]}")
+                            if hasattr(response, 'content'):
+                                 PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): Response has .content attribute.")
+                            if hasattr(response, 'is_error'):
+                                 PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): Response has .is_error attribute.")
+                        except Exception as log_e:
+                            PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Error during detailed logging of response: {log_e}")
+
+                    collected_content_parts = []
+                    is_error_response = False # Default for FastMCPClient path, errors are exceptions
+
+                    if hasattr(response, '__aiter__'): # Async iterator (e.g. for streaming responses)
+                        async for part_data in response: # Renamed to part_data
+                            if isinstance(part_data, dict):
+                                try:
+                                    processed_part = ContentPart(**part_data)
+                                    collected_content_parts.append(processed_part)
+                                except Exception as e:
+                                    PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Error converting dict to ContentPart: {e}. Original part: {part_data}")
+                                    PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Skipping part due to conversion error.")
+                            elif hasattr(part_data, 'type') and (hasattr(part_data, 'text') or hasattr(part_data, 'tool_code') or hasattr(part_data, 'tool_calls') or hasattr(part_data, 'image_url') or hasattr(part_data, 'error')):
+                                collected_content_parts.append(part_data) # Assumes structural compatibility
+                            else:
+                                PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Unexpected part type '{type(part_data)}' in stream from FastMCPClient. Skipping part: {str(part_data)[:200]}")
+                    elif isinstance(response, list): # Already a list of parts
+                        # Assuming if it's a list, items are already compatible ContentPart-like objects or dicts
+                        for part_data in response:
+                            if isinstance(part_data, dict):
+                                try:
+                                    processed_part = ContentPart(**part_data)
+                                    collected_content_parts.append(processed_part)
+                                except Exception as e:
+                                    PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Error converting dict in list to ContentPart: {e}. Original part: {part_data}")
+                                    PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Skipping part in list due to conversion error.")
+                            elif hasattr(part_data, 'type') and (hasattr(part_data, 'text') or hasattr(part_data, 'tool_code') or hasattr(part_data, 'tool_calls') or hasattr(part_data, 'image_url') or hasattr(part_data, 'error')):
+                                collected_content_parts.append(part_data)
+                            else:
+                                PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Unexpected part type '{type(part_data)}' in list from FastMCPClient. Skipping part: {str(part_data)[:200]}")
+                    elif hasattr(response, 'content') and isinstance(response.content, list) and hasattr(response, 'is_error'):
+                        # This handles if FastMCPClient.call_tool() returns an object
+                        # similar to mcp.types.CallToolResult directly (non-streaming case)
+                        collected_content_parts.extend(response.content)
+                        is_error_response = response.is_error # Capture tool-level error
+                    elif response is not None: # Fallback: treat as a single content part if not None
+                        # This case might need refinement based on actual FastMCPClient behavior for non-streaming, non-error single part responses
+                        PrintStyle(font_color="orange").print(f"MCPClientRemote ({server.name}): Response from FastMCPClient.call_tool was not an iterator, list, or recognized CallToolResult-like object. Treating as single content part: {type(response)}")
+                        collected_content_parts.append(response)
+                    else: # response is None
+                         PrintStyle(font_color="orange").print(f"MCPClientRemote ({server.name}): Response from FastMCPClient.call_tool was None.")
+
+                    return CallToolResult(content=collected_content_parts, isError=is_error_response)
 
             except Exception as e:
                 PrintStyle(background_color="#AA4455", font_color="white", padding=True).print(
