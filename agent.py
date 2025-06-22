@@ -25,6 +25,15 @@ from python.helpers.defer import DeferredTask
 from typing import Callable
 from python.helpers.localization import Localization
 
+# OpenTelemetry tracing for agent operations
+try:
+    from opentelemetry import trace
+    OTEL_TRACER = trace.get_tracer(__name__)
+    OTEL_AVAILABLE = True
+except ImportError:
+    OTEL_TRACER = None
+    OTEL_AVAILABLE = False
+
 
 class AgentContextType(Enum):
     USER = "user"
@@ -353,9 +362,33 @@ class Agent:
                                 printer.stream(chunk)
                                 await self.handle_response_stream(full)
 
-                        agent_response = await self.call_chat_model(
-                            prompt, callback=stream_callback
-                        )  # type: ignore
+                        # Add OpenTelemetry span around LLM call
+                        if OTEL_AVAILABLE and OTEL_TRACER:
+                            with OTEL_TRACER.start_as_current_span(
+                                "llm.chat_model.call",
+                                attributes={
+                                    "llm.model.name": getattr(self.config.chat_model, 'name', 'unknown'),
+                                    "llm.model.provider": str(getattr(self.config.chat_model, 'provider', 'unknown')),
+                                    "agent.number": self.number,
+                                    "agent.name": self.agent_name,
+                                    "loop.iteration": self.loop_data.iteration,
+                                }
+                            ) as span:
+                                try:
+                                    agent_response = await self.call_chat_model(
+                                        prompt, callback=stream_callback
+                                    )  # type: ignore
+                                    span.set_attribute("llm.response.success", True)
+                                    if hasattr(agent_response, 'content'):
+                                        span.set_attribute("llm.response.length", len(str(agent_response.content)))
+                                except Exception as e:
+                                    span.record_exception(e)
+                                    span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                                    raise
+                        else:
+                            agent_response = await self.call_chat_model(
+                                prompt, callback=stream_callback
+                            )  # type: ignore
 
                         await self.handle_intervention(agent_response)
 
@@ -762,7 +795,33 @@ class Agent:
                 await self.handle_intervention()
                 await tool.before_execution(**tool_args)
                 await self.handle_intervention()
-                response = await tool.execute(**tool_args)
+                
+                # Add OpenTelemetry span around tool execution
+                if OTEL_AVAILABLE and OTEL_TRACER:
+                    with OTEL_TRACER.start_as_current_span(
+                        f"tool.execute.{tool_name}",
+                        attributes={
+                            "tool.name": tool_name,
+                            "tool.method": tool_method or "default",
+                            "agent.number": self.number,
+                            "agent.name": self.agent_name,
+                        }
+                    ) as span:
+                        try:
+                            # Add tool arguments as span attributes (safely)
+                            for key, value in (tool_args or {}).items():
+                                if isinstance(value, (str, int, float, bool)):
+                                    span.set_attribute(f"tool.args.{key}", str(value)[:500])  # Limit length
+                            
+                            response = await tool.execute(**tool_args)
+                            span.set_attribute("tool.execution.success", True)
+                        except Exception as e:
+                            span.record_exception(e)
+                            span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                            raise
+                else:
+                    response = await tool.execute(**tool_args)
+                
                 await self.handle_intervention()
                 await tool.after_execution(response)
                 await self.handle_intervention()

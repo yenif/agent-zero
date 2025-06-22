@@ -16,6 +16,52 @@ from python.helpers.extract_tools import load_classes_from_folder
 from python.helpers.api import ApiHandler
 from python.helpers.print_style import PrintStyle
 
+# OpenTelemetry auto-instrumentation setup
+try:
+    from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.instrumentation.flask import FlaskInstrumentor
+    from opentelemetry.instrumentation.requests import RequestsInstrumentor
+    from opentelemetry.instrumentation.urllib3 import URLLib3Instrumentor
+    from opentelemetry.sdk.resources import Resource
+    
+    # Configure OTEL resource
+    resource = Resource.create({
+        "service.name": "agent-zero",
+        "service.version": "v0.8.5.1",
+        "deployment.environment": "production"
+    })
+    
+    # Set up tracer provider
+    trace.set_tracer_provider(TracerProvider(resource=resource))
+    tracer = trace.get_tracer(__name__)
+    
+    # Configure OTLP exporter to ClickStack
+    otlp_exporter = OTLPSpanExporter(
+        endpoint="http://clickstack-clickstack-hdx-oss-v2-otel-collector.clickstack.svc.cluster.local:4318/v1/traces",
+        headers={"authorization": "6f82b578-1ff2-4011-beaf-4a03ddb7fa08"}
+    )
+    
+    # Add span processor
+    span_processor = BatchSpanProcessor(otlp_exporter)
+    trace.get_tracer_provider().add_span_processor(span_processor)
+    
+    # Auto-instrument common libraries
+    RequestsInstrumentor().instrument()
+    URLLib3Instrumentor().instrument()
+    
+    PrintStyle(font_color="green").print("✅ OpenTelemetry auto-instrumentation initialized")
+    OTEL_ENABLED = True
+    
+except ImportError as e:
+    PrintStyle(font_color="yellow").print(f"⚠️ OpenTelemetry not available: {e}")
+    OTEL_ENABLED = False
+except Exception as e:
+    PrintStyle(font_color="red").print(f"❌ OpenTelemetry initialization failed: {e}")
+    OTEL_ENABLED = False
+
 
 # Set the new timezone to 'UTC'
 os.environ["TZ"] = "UTC"
@@ -25,6 +71,14 @@ time.tzset()
 # initialize the internal Flask server
 webapp = Flask("app", static_folder=get_abs_path("./webui"), static_url_path="/")
 webapp.config["JSON_SORT_KEYS"] = False  # Disable key sorting in jsonify
+
+# Auto-instrument Flask app
+if OTEL_ENABLED:
+    try:
+        FlaskInstrumentor().instrument_app(webapp)
+        PrintStyle(font_color="green").print("✅ Flask auto-instrumentation enabled")
+    except Exception as e:
+        PrintStyle(font_color="red").print(f"❌ Flask instrumentation failed: {e}")
 
 lock = threading.Lock()
 
