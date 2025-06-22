@@ -88,9 +88,30 @@ Here are templates for configuring individual servers within the `mcp_servers` J
         "Authorization": "Bearer YOUR_API_KEY_OR_TOKEN",
         "X-Custom-Header": "some_value"
     },
-    "timeout": 5.0, // Optional: Connection timeout in seconds (default: 5.0).
-    "sse_read_timeout": 300.0, // Optional: Read timeout for the SSE stream in seconds (default: 300.0, i.e., 5 minutes).
+    "init_timeout": 5, // Optional: Initial connection timeout in seconds (default: system-wide MCP client init timeout).
+    "tool_timeout": 300, // Optional: Timeout for individual tool calls in seconds (default: system-wide MCP client tool timeout).
+    "transport": "auto", // Optional: Transport selection. Can be "auto", "streamable-http", or "sse". Default is "auto".
     "disabled": false
+}
+```
+
+**Remote Server Transport Configuration (`transport` field):**
+
+For remote MCP servers (those configured with a `url`), you can specify the communication transport method using the `transport` field. This field accepts one of three values:
+
+*   `"auto"` (Default): Agent Zero will attempt to auto-detect the best transport. If the server `url` does not contain `/sse/` (case-insensitive), it will use the **Streamable HTTP** transport. If `/sse/` is found in the URL, it will fall back to the **SSE** transport.
+*   `"streamable-http"`: This forces Agent Zero to use the **Streamable HTTP** transport. This is generally recommended for FastMCP servers that support it, as it can offer better performance and compatibility.
+*   `"sse"`: This forces Agent Zero to use the **Server-Sent Events (SSE)** transport.
+
+**Example of `transport` field in a remote server configuration:**
+```json
+{
+  "name": "MyRemoteMCPServer",
+  "description": "A remote MCP server explicitly using Streamable HTTP",
+  "url": "https://example.com/mcp_stream_endpoint", // An endpoint that supports Streamable HTTP
+  "transport": "streamable-http",
+  "headers": { "X-API-Key": "yourkey" },
+  "disabled": false
 }
 ```
 
