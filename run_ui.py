@@ -41,7 +41,7 @@ try:
     # Configure OTLP exporter to ClickStack
     otlp_exporter = OTLPSpanExporter(
         endpoint="http://clickstack-clickstack-hdx-oss-v2-otel-collector.clickstack.svc.cluster.local:4318/v1/traces",
-        headers={"authorization": "6f82b578-1ff2-4011-beaf-4a03ddb7fa08"}
+        headers={"authorization": os.getenv("HYPERDX_API_KEY", "6f82b578-1ff2-4011-beaf-4a03ddb7fa08")}
     )
     
     # Add span processor
