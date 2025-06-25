@@ -100,6 +100,15 @@
     <!-- HyperDX Browser SDK -->
     <script src="https://unpkg.com/@hyperdx/browser@latest/build/index.js"></script>
     
+    <!-- Inject server configuration -->
+    <script>
+        window.AGENT_ZERO_CONFIG = {
+            hyperdxApiKey: '{hyperdx_api_key}',
+            version: '{version_no}',
+            buildTime: '{version_time}'
+        };
+    </script>
+    
     <!-- Load module scripts first -->
     <script type="module" src="js/hyperdx.js"></script>
     <script type="module" src="js/scheduler.js"></script>

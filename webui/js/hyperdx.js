@@ -3,9 +3,9 @@
  * Provides session replay, trace correlation, and observability
  */
 
-// HyperDX configuration
+// HyperDX configuration - API key injected from server
 const HYPERDX_CONFIG = {
-    apiKey: 'KksW498NLF7s4Arr5fhprcrnDS1ZU9UU',
+    apiKey: window.AGENT_ZERO_CONFIG?.hyperdxApiKey || '',
     service: 'agent-zero-webui',
     url: 'https://clickstack.taildc2cd.ts.net/v1/traces', // Our ClickStack OTEL endpoint
     consoleCapture: true,
