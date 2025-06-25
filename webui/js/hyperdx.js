@@ -7,7 +7,7 @@
 const HYPERDX_CONFIG = {
     apiKey: window.AGENT_ZERO_CONFIG?.hyperdxApiKey || '',
     service: 'agent-zero-webui',
-    url: 'https://clickstack.taildc2cd.ts.net/v1/traces', // Our ClickStack OTEL endpoint
+    url: 'https://clickstack.taildc2cd.ts.net', // Our ClickStack OTEL base endpoint (SDK appends /v1/traces, /v1/logs, etc.)
     consoleCapture: true,
     advancedNetworkCapture: true,
     maskAllInputs: false, // We want to capture input for debugging
