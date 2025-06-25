@@ -1,5 +1,6 @@
 import * as msgs from "./js/messages.js";
 import { speech } from "./js/speech.js";
+import { initializeHyperDX, trackMessageSent, trackAgentResponse, trackError, setUserContext } from "./js/hyperdx.js";
 
 const leftPanel = document.getElementById('left-panel');
 const rightPanel = document.getElementById('right-panel');
@@ -56,7 +57,11 @@ function handleResize() {
     }
 }
 
-window.addEventListener('load', handleResize);
+window.addEventListener('load', () => {
+    handleResize();
+    // Initialize HyperDX for session tracking and observability
+    initializeHyperDX();
+});
 window.addEventListener('resize', handleResize);
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -91,6 +96,13 @@ export async function sendMessage() {
         if (message || hasAttachments) {
             let response;
             const messageId = generateGUID();
+            
+            // Track message sending in HyperDX
+            try {
+                trackMessageSent(message, attachments || []);
+            } catch (error) {
+                console.warn('Failed to track message in HyperDX:', error);
+            }
 
             // Include attachments in the user message
             if (hasAttachments) {
@@ -155,6 +167,14 @@ export async function sendMessage() {
             // }
             else {
                 setContext(jsonResponse.context);
+                
+                // Track successful agent response in HyperDX
+                try {
+                    const responseText = JSON.stringify(jsonResponse);
+                    trackAgentResponse(responseText.length, []);
+                } catch (error) {
+                    console.warn('Failed to track agent response in HyperDX:', error);
+                }
             }
 
             // Clear input and attachments
@@ -164,6 +184,17 @@ export async function sendMessage() {
             adjustTextareaHeight();
         }
     } catch (e) {
+        // Track error in HyperDX
+        try {
+            trackError(e, {
+                action: 'send-message',
+                message: chatInput.value.trim(),
+                context: 'sendMessage function'
+            });
+        } catch (trackingError) {
+            console.warn('Failed to track error in HyperDX:', trackingError);
+        }
+        
         toastFetchError("Error sending message", e)
     }
 }
