@@ -1,6 +1,9 @@
 import * as msgs from "./js/messages.js";
 import { speech } from "./js/speech.js";
 import { initializeHyperDX, trackMessageSent, trackAgentResponse, trackError, setUserContext } from "./js/hyperdx.js";
+import * as api from "./js/api.js";
+
+window.fetchApi = api.fetchApi; // TODO - backward compatibility for non-modular scripts, remove once refactored to alpine
 
 const leftPanel = document.getElementById('left-panel');
 const rightPanel = document.getElementById('right-panel');
