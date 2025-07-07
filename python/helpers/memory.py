@@ -30,7 +30,10 @@ from python.helpers.log import Log, LogItem
 from enum import Enum
 from agent import Agent, ModelConfig
 import models
+import logging
 
+# Raise the log level so WARNING messages aren't shown
+logging.getLogger("langchain_core.vectorstores.base").setLevel(logging.ERROR)
 
 class MyFaiss(FAISS):
     # override aget_by_ids
@@ -117,8 +120,7 @@ class Memory:
             os.makedirs(em_dir, exist_ok=True)
             store = LocalFileStore(em_dir)
 
-        embeddings_model = models.get_model(
-            models.ModelType.EMBEDDING,
+        embeddings_model = models.get_embedding_model(
             model_config.provider,
             model_config.name,
             **model_config.kwargs,
