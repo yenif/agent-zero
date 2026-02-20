@@ -1131,23 +1131,6 @@ class MCPClientRemote(MCPClientBase):
                 async with FastMCPClient(transport=transport) as client:
                     response = await client.call_tool(tool_name, input_data)
 
-                    PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): Raw response type from FastMCPClient.call_tool: {type(response)}")
-                    if hasattr(response, '__aiter__'): # Check if it's an async iterator
-                        PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): Response appears to be an async iterator.")
-                    elif isinstance(response, list):
-                        PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): Response appears to be a list. Length: {len(response)}")
-                        if response:
-                            PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): First item type: {type(response[0])}, First item: {str(response[0])[:200]}")
-                    else:
-                        try:
-                            PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): Response (non-iterator, non-list): {str(response)[:200]}")
-                            if hasattr(response, 'content'):
-                                 PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): Response has .content attribute.")
-                            if hasattr(response, 'is_error'):
-                                 PrintStyle(font_color="magenta").print(f"MCPClientRemote ({server.name}): Response has .is_error attribute.")
-                        except Exception as log_e:
-                            PrintStyle(font_color="red").print(f"MCPClientRemote ({server.name}): Error during detailed logging of response: {log_e}")
-
                     collected_content_parts = []
                     is_error_response = False # Default for FastMCPClient path, errors are exceptions
 
